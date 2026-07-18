@@ -118,7 +118,7 @@ comparison_stats = df.groupby("structure_type")["band_gap"].agg([
 print("\n Statistical Summary:")
 print("-"*50)
 for idx, row in comparison_stats.iterrows():
-    print(f"\n🔸 {idx}:")
+    print(f"\n {idx}:")
     print(f"   ├── Average Bandgap: {row['Average Bandgap (eV)']:.3f} eV")
     print(f"   ├── Range: {row['Min Bandgap (eV)']:.3f} - {row['Max Bandgap (eV)']:.3f} eV")
     print(f"   ├── Standard Deviation: {row['Standard Deviation']:.3f} eV")
