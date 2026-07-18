@@ -2,38 +2,70 @@
 # Multi-Dopant SnO and 2D SnO: Electronic Properties Analysis
 # DOPANTS: Mg, Zn, Pb, N - FOCUSED VERSION: 0-50% Doping Range
 # Doping Levels: 1%, 2%, 5%, 10%, 15%, 20%, 30%, 45%, 50%
-# Properties: Bandgap (ML), Formation Energy (ML), Conductivity, Mobility, Effective Mass, Absorption
+# Properties: Bandgap (Pure ML), Formation Energy (ML), Conductivity, Mobility, Effective Mass, Absorption
 # ============================================================
 
-# === 0. Colab One-time Installs ===
-!pip install -q mp-api pymatgen scikit-learn pandas matplotlib seaborn numpy joblib scipy
+# ==========================================================
+# 0. Colab One-time Installs
+# ==========================================================
 
-# === 1. Imports & Configuration ===
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from mp_api.client import MPRester
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
-from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-from scipy import stats
-import joblib
+!pip install -q mp-api pymatgen
+
+# ==========================================================
+# 1. Imports & Configuration
+# ==========================================================
+
 import warnings
 warnings.filterwarnings("ignore")
 
-plt.style.use('default')
+import random
+import joblib
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from mp_api.client import MPRester
+
+from sklearn.model_selection import (
+    train_test_split,
+    cross_val_score,
+    GridSearchCV,
+    KFold
+)
+
+from sklearn.preprocessing import StandardScaler, RobustScaler
+
+from sklearn.ensemble import (
+    RandomForestRegressor,
+    GradientBoostingRegressor
+)
+
+from sklearn.metrics import (
+    r2_score,
+    mean_absolute_error,
+    mean_squared_error
+)
+
+from scipy import stats
+
+# Reproducibility
+np.random.seed(42)
+random.seed(42)
+
+# Plot settings
+plt.style.use("default")
 sns.set_theme(style="whitegrid")
 
 API_KEY = "4QoUiunPSMRpqOLTwA6qRu8edPSBArZD"
 
-print("="*80)
+print("=" * 80)
 print("MULTI-DOPANT SnO ELECTRONIC PROPERTIES ANALYSIS - FOCUSED 0-50%")
 print("DOPANTS: Mg, Zn, Pb, N")
 print("Focus: P-type Conductivity + Electronic Properties")
 print("FOCUSED: Bandgap (Pure ML) + Formation Energy (ML + Physics)")
-print("="*80)
+print("=" * 80)
 
 # === 2. Enhanced Multi-Dopant Data Fetching ===
 print("\nFetching SnO and multi-doped SnO materials from Materials Project...")
@@ -163,7 +195,7 @@ for dopant in ['Pure'] + list(DOPANTS.keys()):
         print(f"   {label:8} | {range_count:4d} materials ({range_percentage:5.1f}%)")
 
 # USE 50% DOPING FILTER - FOCUSED RANGE FOR ALL DOPANTS
-print(f"\n USING 50% DOPING FILTER FOR ALL DOPANTS - FOCUSED APPROACH")
+print(f"\n USING 50% DOPING FILTER FOR ALL DOPANTS - FOCUSED APPROACH!")
 print(f"Goal: Analyze all dopants in practical 0-50% range")
 
 df_strategic = df[df["doping_percent"] <= 50.0].copy()  # FOCUSED 0-50%
@@ -191,19 +223,22 @@ def create_physical_2D_features(df):
     """Create physics-based features to identify 2D structures"""
 
     # Layered structure indicators
-    df["atoms_per_unit_volume"] = df["nsites"] / df["volume"]
+    df["atoms_per_unit_volume"] = (df["volume"] / df["nsites"]) ** (1/3)
     df["volume_expansion"] = df["volume"] / df["nsites"]  # Same as volume_per_site
 
     # Electronic structure indicators
-    df["electronic_anisotropy"] = df["band_gap"] / df["density"]
-    df["bandgap_density_product"] = df["band_gap"] * df["density"]
+    # Electronic anisotropy estimated from band-edge separation
+    df["electronic_anisotropy"] = np.abs(df["cbm"]) / (np.abs(df["vbm"]) + 1e-6)
+
+    # Electronic density indicator
+    df["bandgap_density_product"] = np.abs(df["cbm"] - df["vbm"]) * df["density"]
 
     # Coordination environment
     df["coordination_factor"] = df["nsites"] / (df["volume"] ** (1/3))
     df["dimensional_factor"] = df["volume"] / (df["nsites"] ** (2/3))
 
     # Quantum confinement indicators
-    df["confinement_parameter"] = df["band_gap"] * df["volume_per_site"]
+    df["confinement_parameter"] = df["nsites"] / df["volume"]
     df["thickness_indicator"] = df["volume"] / (df["nsites"] * df["density"])
 
     return df
@@ -282,7 +317,7 @@ df["structural_factor"] = df["is_2D_physics"].astype(int)
 print(f"Physics-based 2D classification completed")
 print(f"Materials classified: {len(df)} total samples")
 # ============================================================
-#  EXACT DATASET COUNTS
+#  EXACT DATASET COUNTS 
 # ============================================================
 
 print("\n" + "="*80)
@@ -515,7 +550,6 @@ def calculate_absorption_tauc(bandgap, doping_percent):
 def apply_electronic_focused_corrections_multi_dopant(doping, predicted_formation_energy, structure_type, dopant_type):
     """
     Apply corrections focused on electronic properties optimization
-    ALL DOPANTS NOW USE PURE ML - NO PHYSICS CORRECTIONS
     This reveals natural stability of all dopants without artificial corrections
     """
 
@@ -569,7 +603,7 @@ models = {
         random_state=42, n_jobs=-1, oob_score=True
     ),
     "Gradient Boosting": GradientBoostingRegressor(
-        n_estimators=1500, learning_rate=0.05, max_depth=6,
+        n_estimators=2000, learning_rate=0.05, max_depth=6,
         subsample=0.8, min_samples_split=3, min_samples_leaf=2,
         max_features='sqrt', random_state=42
     )
@@ -597,8 +631,8 @@ for name, model in models.items():
     test_mae = mean_absolute_error(y_bg_test, y_test_pred)
     test_rmse = np.sqrt(mean_squared_error(y_bg_test, y_test_pred))
 
-    cv_scores = cross_val_score(model, X_train_scaled, y_bg_train, cv=5, scoring='r2')
-
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(model, X_train_scaled, y_bg_train, cv=kf, scoring='r2')
     results.append({
         "Model": name,
         "Train R²": train_r2,
@@ -634,7 +668,7 @@ for name, model_class in [("Random Forest", RandomForestRegressor), ("Gradient B
         )
     else:
         fe_model = model_class(
-            n_estimators=1500, learning_rate=0.05, max_depth=6,
+            n_estimators=2000, learning_rate=0.05, max_depth=6,
             subsample=0.8, min_samples_split=3, min_samples_leaf=2,
             max_features='sqrt', random_state=42
         )
@@ -650,8 +684,8 @@ for name, model_class in [("Random Forest", RandomForestRegressor), ("Gradient B
     fe_test_mae = mean_absolute_error(y_fe_test, y_fe_test_pred)
     fe_test_rmse = np.sqrt(mean_squared_error(y_fe_test, y_fe_test_pred))
 
-    cv_scores_fe = cross_val_score(fe_model, X_train_scaled, y_fe_train, cv=5, scoring='r2')
-
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores_fe = cross_val_score(fe_model, X_train_scaled, y_fe_train, cv=kf, scoring='r2')
     formation_results.append({
         "Model": name,
         "Train R²": fe_train_r2,
@@ -716,7 +750,7 @@ for dopant in dopants_to_analyze:
 
         for doping in doping_levels:
             if dopant == 'Pure' and doping > 0:
-                continue  # Skip doped levels for pure material
+                continue  
 
             sample_data = median_values.copy()
 
@@ -799,13 +833,13 @@ print("="*120)
 # FIRST: Maximum P-type conductivity and mobility for each dopant individually
 dopants_analysis = ['Mg', 'Zn', 'Pb', 'N']
 
-print("\n INDIVIDUAL DOPANT ANALYSIS - MAXIMUM VALUES:")
+print("\n1️ INDIVIDUAL DOPANT ANALYSIS - MAXIMUM VALUES:")
 print("="*80)
 
 individual_maxima = {}
 
 for dopant in dopants_analysis:
-    print(f"\n {dopant} DOPANT ANALYSIS:")
+    print(f"\n🔬 {dopant} DOPANT ANALYSIS:")
     print("-" * 50)
 
     # Filter data for this dopant (both Bulk and 2D)
@@ -864,7 +898,7 @@ for dopant in dopants_analysis:
         print(f"     • 2D SnO most stable: {min_fe_2d:.3f} eV/atom at {min_fe_2d_doping}% doping")
 
 print("\n" + "="*120)
-print(" INTER-DOPANT COMPARISON - OVERALL MAXIMUM VALUES:")
+print("2️ INTER-DOPANT COMPARISON - OVERALL MAXIMUM VALUES:")
 print("="*120)
 
 # SECOND: Compare maximum values between all dopants
@@ -892,7 +926,7 @@ print("\n2D SnO - Conductivity Ranking:")
 for i, (dopant, cond, doping) in enumerate(all_2d_cond):
     print(f"   {i+1}. {dopant:2} | {cond:.2e} S/m at {doping}% doping")
 
-print("\n OVERALL MAXIMUM HOLE MOBILITY COMPARISON:")
+print("\n🏆 OVERALL MAXIMUM HOLE MOBILITY COMPARISON:")
 print("-" * 70)
 
 # Find overall maximum mobility across all dopants
