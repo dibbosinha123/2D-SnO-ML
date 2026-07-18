@@ -1,30 +1,68 @@
-# ============================================================
-# 0)  (Colab) one-time installs
-# ============================================================
-!pip install -q mp-api pymatgen scikit-learn pandas matplotlib seaborn shap joblib
 
-# ============================================================
-# 1) Imports & config
-# ============================================================
-import pandas as pd, numpy as np, matplotlib.pyplot as plt, seaborn as sns
-from mp_api.client import MPRester
-from sklearn.model_selection import train_test_split, cross_val_score, learning_curve
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import KNNImputer
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel as C
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.svm import SVR
-from sklearn.neural_network import MLPRegressor
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-import shap, joblib, warnings, os, json
+# 0) Colab One-time Installs
+# ==========================================================
+
+!pip install -q mp-api pymatgen shap
+
+# ==========================================================
+# 1) Imports & Configuration
+# ==========================================================
+
+import warnings
 warnings.filterwarnings("ignore")
 
-# Set default plot style
-plt.style.use('default')
+import os
+import json
+import joblib
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import shap
+
+from mp_api.client import MPRester
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import learning_curve
+from sklearn.model_selection import GridSearchCV
+
+from sklearn.preprocessing import (
+    StandardScaler,
+    OneHotEncoder
+)
+
+from sklearn.impute import KNNImputer
+
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import (
+    RBF,
+    WhiteKernel,
+    ConstantKernel as C
+)
+
+from sklearn.ensemble import (
+    RandomForestRegressor,
+    GradientBoostingRegressor
+)
+
+from sklearn.svm import SVR
+from sklearn.neural_network import MLPRegressor
+
+from sklearn.metrics import (
+    r2_score,
+    mean_absolute_error,
+    mean_squared_error
+)
+
+# Plot settings
+plt.style.use("default")
 sns.set_theme(style="whitegrid")
 
 API_KEY = "4QoUiunPSMRpqOLTwA6qRu8edPSBArZD"
+import sklearn
+print(sklearn.__version__)
+print(GridSearchCV)
 
 # ============================================================
 # 2) Fetch SnO & doped-SnO materials with modified filters
@@ -80,7 +118,7 @@ comparison_stats = df.groupby("structure_type")["band_gap"].agg([
 print("\n Statistical Summary:")
 print("-"*50)
 for idx, row in comparison_stats.iterrows():
-    print(f"\n {idx}:")
+    print(f"\n🔸 {idx}:")
     print(f"   ├── Average Bandgap: {row['Average Bandgap (eV)']:.3f} eV")
     print(f"   ├── Range: {row['Min Bandgap (eV)']:.3f} - {row['Max Bandgap (eV)']:.3f} eV")
     print(f"   ├── Standard Deviation: {row['Standard Deviation']:.3f} eV")
@@ -131,46 +169,150 @@ plt.show()
 # ============================================================
 # 3) Enhanced Feature engineering
 # ============================================================
-num_cols = ["density", "volume", "nsites",
-            "formation_energy_per_atom", "cbm", "vbm"]
-df[num_cols] = KNNImputer(n_neighbors=5).fit_transform(df[num_cols])
+num_cols = [
+    "density",
+    "volume",
+    "nsites",
+    "formation_energy_per_atom",
+    "cbm",
+    "vbm"
+]
+
+for col in num_cols:
+    df[col] = df[col].fillna(df[col].median())
 
 # Comprehensive feature engineering
 df["avg_atomic_volume"] = df["volume"] / df["nsites"]
 df["dopant_count"] = df["nelements"] - 2
-df["energy_density"] = df["formation_energy_per_atom"] * df["density"]
+# =====================================================
+# Physics-informed descriptors
+# =====================================================
+
 df["band_width"] = df["cbm"] - df["vbm"]
-df["volume_per_site"] = df["volume"] / df["nsites"]
-df["density_squared"] = df["density"] ** 2
-df["volume_squared"] = df["volume"] ** 2
-df["energy_squared"] = df["formation_energy_per_atom"] ** 2
-df["density_volume"] = df["density"] * df["volume"]
-df["energy_volume"] = df["formation_energy_per_atom"] * df["volume"]
-df["band_gap_density_ratio"] = df["band_gap"] / df["density"]
-df["formation_energy_ratio"] = df["formation_energy_per_atom"] / df["volume"]
 
-# One-hot encode dopant element
-df["dopant"] = df["elements"].apply(
-    lambda els: sorted(set(els) - {"Sn", "O"}) or ["none"]
-).str[0]
+df["band_center"] = (
+    df["cbm"] + df["vbm"]
+) / 2
 
-ohe = OneHotEncoder(sparse_output=False)
-dopant_ohe = pd.DataFrame(
-    ohe.fit_transform(df[["dopant"]]),
-    columns=ohe.get_feature_names_out(["dopant"])
+df["band_asymmetry"] = (
+    df["cbm"] - df["band_center"]
+) / (df["band_width"] + 1e-6)
+
+df["electronic_factor"] = (
+    df["cbm"] + df["vbm"]
 )
-df = pd.concat([df.reset_index(drop=True), dopant_ohe], axis=1)
+
+df["energy_density"] = (
+    df["formation_energy_per_atom"] *
+    df["density"]
+)
+
+df["stability_factor"] = (
+    -df["formation_energy_per_atom"]
+)
+
+df["density_squared"] = df["density"]**2
+
+df["volume_squared"] = df["volume"]**2
+
+df["nsites_squared"] = df["nsites"]**2
+
+df["density_volume_ratio"] = (
+    df["density"] /
+    (df["volume"] + 1e-6)
+)
+
+df["energy_per_volume"] = (
+    df["formation_energy_per_atom"] /
+    (df["volume"] + 1e-6)
+)
+
+df["compactness"] = (
+    df["nsites"] /
+    (df["volume"] + 1e-6)
+)
+
+df["atoms_per_unit_volume"] = (
+    df["nsites"] /
+    (df["volume"] + 1e-6)
+)
+
+df["coordination_factor"] = (
+    df["density"] *
+    df["nsites"] /
+    (df["volume"] + 1e-6)
+)
+
+df["electronic_anisotropy"] = (
+    np.abs(df["cbm"] - df["vbm"])
+)
+
+df["dimensional_factor"] = np.where(
+    df["structure_type"]=="2D SnO",
+    1,
+    0
+)
+
+df["confinement_parameter"] = (
+    1 /
+    (df["volume_per_site"] + 1e-6)
+)
+
 
 # Select features
 base_feats = [
-    "density", "volume", "nsites", "formation_energy_per_atom",
-    "cbm", "vbm", "avg_atomic_volume", "dopant_count",
-    "energy_density", "band_width", "volume_per_site",
-    "density_squared", "volume_squared", "energy_squared",
-    "density_volume", "energy_volume", "band_gap_density_ratio",
-    "formation_energy_ratio"
+
+"density",
+"volume",
+"nsites",
+"formation_energy_per_atom",
+
+"cbm",
+"vbm",
+
+"avg_atomic_volume",
+
+"dopant_count",
+
+"volume_per_site",
+
+"band_width",
+
+"band_center",
+
+"band_asymmetry",
+
+"electronic_factor",
+
+"energy_density",
+
+"stability_factor",
+
+"density_squared",
+
+"volume_squared",
+
+"nsites_squared",
+
+"density_volume_ratio",
+
+"energy_per_volume",
+
+"compactness",
+
+"atoms_per_unit_volume",
+
+"coordination_factor",
+
+"electronic_anisotropy",
+
+"dimensional_factor",
+
+"confinement_parameter"
+
 ]
-final_feats = base_feats + list(dopant_ohe.columns)
+
+final_feats = base_feats
 X, y = df[final_feats], df["band_gap"]
 
 # ============================================================
@@ -183,33 +325,50 @@ scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_val_scaled = scaler.transform(X_val)
 X_test_scaled = scaler.transform(X_test)
-
+param_grid = {
+    "n_estimators":[1000,1500],
+    "learning_rate":[0.02,0.03,0.05],
+    "max_depth":[3,4],
+    "subsample":[0.8,0.9],
+    "min_samples_split":[2,4],
+    "min_samples_leaf":[1,2]
+}
 # ============================================================
 # 5) Optimized Model zoo with regularization
 # ============================================================
 kernel = (C(1.0, (1e-3, 1e3)) *
          RBF([1.0] * X_train_scaled.shape[1], (1e-2, 1e2)) +
          WhiteKernel(noise_level=1e-2))
+gb = GradientBoostingRegressor(random_state=42)
 
+gb_search = GridSearchCV(
+    estimator=gb,
+    param_grid=param_grid,
+    scoring="r2",
+    cv=5,
+    n_jobs=-1,
+    verbose=1
+)
+
+gb_search.fit(X_train_scaled, y_train)
+
+print(gb_search.best_params_)
+print(gb_search.best_score_)
+
+best_gb = gb_search.best_estimator_
 models = {
     "RandomForest": RandomForestRegressor(
-        n_estimators=1000,
-        max_depth=15,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        max_features='sqrt',
+        n_estimators=800,
+        max_depth=25,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        max_features=0.8,
         bootstrap=True,
         random_state=42,
         n_jobs=-1
     ),
-    "GradientBoosting": GradientBoostingRegressor(
-        n_estimators=500,
-        learning_rate=0.01,
-        max_depth=6,
-        subsample=0.8,
-        min_samples_split=5,
-        random_state=42
-    ),
+    "GradientBoosting": best_gb,
+
     "SVR": SVR(
         kernel='rbf',
         C=10.0,
@@ -318,7 +477,7 @@ print("="*80)
 print(results_df.to_string(float_format=lambda x: '{:.4f}'.format(x)))
 
 # ============================================================
-# 📊 Combined Performance Visualization
+#  Combined Performance Visualization
 # ============================================================
 
 fig, ax1 = plt.subplots(figsize=(14, 7))
@@ -434,5 +593,7 @@ plt.tight_layout()
 plt.show()
 
 # Save predictions
+predictions_df.to_csv("predicted_band_gaps_SnO.csv", index=False)
+print("\n Predictions saved to predicted_band_gaps_SnO.csv")
 predictions_df.to_csv("predicted_band_gaps_SnO.csv", index=False)
 print("\n Predictions saved to predicted_band_gaps_SnO.csv")
