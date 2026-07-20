@@ -250,14 +250,14 @@ def classify_2D_with_physics(df):
     df = create_physical_2D_features(df)
 
     # Physics-based criteria for 2D materials
-    high_bandgap = df["band_gap"] > df["band_gap"].quantile(0.75)
-    low_atomic_density = df["atoms_per_unit_volume"] < df["atoms_per_unit_volume"].quantile(0.25)
+    high_bandgap = df["band_gap"] > df["band_gap"].quantile(0.60)
+    low_atomic_density = df["atoms_per_unit_volume"] < df["atoms_per_unit_volume"].quantile(0.40)
     high_anisotropy = df["electronic_anisotropy"] > df["electronic_anisotropy"].quantile(0.75)
-    high_expansion = df["volume_expansion"] > df["volume_expansion"].quantile(0.75)
+    high_expansion = df["volume_expansion"] > df["volume_expansion"].quantile(0.60)
     low_coordination = df["coordination_factor"] < df["coordination_factor"].quantile(0.25)
     high_confinement = df["confinement_parameter"] > df["confinement_parameter"].quantile(0.75)
 
-    # Combine criteria (need at least 4 out of 6)
+    # Combine criteria (need at least 3 out of 6)
     criteria_count = (
         high_bandgap.astype(int) +
         low_atomic_density.astype(int) +
@@ -267,7 +267,7 @@ def classify_2D_with_physics(df):
         high_confinement.astype(int)
     )
 
-    df["is_2D_physics"] = criteria_count >= 4
+    df["is_2D_physics"] = criteria_count >= 3
 
     return df
 
